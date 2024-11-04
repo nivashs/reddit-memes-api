@@ -12,6 +12,8 @@ from .services.allmemes import MemeDBService
 from .services.telegram_report import TelegramService
 from dotenv import load_dotenv
 from .schemas import MemeReportRequest 
+from sqlalchemy import text
+from datetime import datetime
 import os
 
 
@@ -41,7 +43,69 @@ class TelegramCredentials(BaseModel):
     bot_token: Optional[str] = Field(None, description="Telegram Bot Token")
     chat_id: Optional[str] = Field(None, description="Telegram Chat ID")
 
+@app.get("/health",
+    summary="Check API health status",
+    description="Checks the health of the API including Reddit API and database connections",
+    response_description="Health status of different components"
+)
+async def health_check(db: Session = Depends(get_db)):
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "components": {
+            "api": {
+                "status": "healthy",
+                "details": "FastAPI server is running"
+            },
+            "reddit_api": {
+                "status": "unknown",
+                "details": None
+            },
+            "database": {
+                "status": "unknown",
+                "details": None
+            }
+        }
+    }
+    
+    # Check Reddit API
+    try:
+        async with RedditService() as reddit_service:
+            await reddit_service.fetch_top_memes(1)
+            health_status["components"]["reddit_api"] = {
+                "status": "healthy",
+                "details": "Successfully connected to Reddit API"
+            }
+    except Exception as e:
+        health_status["components"]["reddit_api"] = {
+            "status": "unhealthy",
+            "details": f"Failed to connect to Reddit API: {str(e)}"
+        }
+        health_status["status"] = "degraded"
 
+    # Check database
+    try:
+        # Simple query to check database connection
+        db.execute(text("SELECT 1"))
+        health_status["components"]["database"] = {
+            "status": "healthy",
+            "details": "Successfully connected to database"
+        }
+    except Exception as e:
+        health_status["components"]["database"] = {
+            "status": "unhealthy",
+            "details": f"Failed to connect to database: {str(e)}"
+        }
+        health_status["status"] = "degraded"
+
+    # If any component is unhealthy, set response code to 503
+    if health_status["status"] != "healthy":
+        raise HTTPException(
+            status_code=503,
+            detail=health_status
+        )
+
+    return health_status
 
 @app.get("/")
 def read_root():
@@ -54,25 +118,24 @@ async def get_top_memes(
 ):
     """Get top memes and store them in database"""
     try:
-        reddit_service = RedditService()
-        memes = await reddit_service.fetch_top_memes(limit)
-        
-        # Store in database
-        for meme_data in memes:
-            # Check if meme exists
-            existing_meme = db.query(models.Meme).filter(
-                models.Meme.reddit_id == meme_data["reddit_id"]
-            ).first()
+        # Use async context manager for RedditService
+        async with RedditService() as reddit_service:
+            memes = await reddit_service.fetch_top_memes(limit)
             
-            if not existing_meme:
-                meme = models.Meme(**meme_data)
-                db.add(meme)
-            else:
-                # Update existing meme
-                for key, value in meme_data.items():
-                    setattr(existing_meme, key, value)
-        db.commit()
-        return memes
+            # Store in database
+            for meme_data in memes:
+                existing_meme = db.query(models.Meme).filter(
+                    models.Meme.reddit_id == meme_data["reddit_id"]
+                ).first()
+                
+                if not existing_meme:
+                    meme = models.Meme(**meme_data)
+                    db.add(meme)
+                else:
+                    for key, value in meme_data.items():
+                        setattr(existing_meme, key, value)
+            db.commit()
+            return memes
     except Exception as e:
         logger.error(f"Error in get_top_memes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -84,8 +147,8 @@ async def get_paginated_memes(
 ):
     """Get paginated memes"""
     try:
-        reddit_service = RedditService()
-        return await reddit_service.fetch_with_pagination(limit, after)
+        async with RedditService() as reddit_service:
+            return await reddit_service.fetch_with_pagination(limit, after)
     except Exception as e:
         logger.error(f"Error in get_paginated_memes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -157,8 +220,8 @@ async def send_meme_report(
             )
 
         # Get memes
-        reddit_service = RedditService()
-        memes = await reddit_service.fetch_top_memes(limit)
+        async with RedditService() as reddit_service:
+            memes = await reddit_service.fetch_top_memes(limit)
 
         # Initialize Telegram service
         telegram_service = TelegramService(bot_token, chat_id)
