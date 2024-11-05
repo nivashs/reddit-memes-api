@@ -28,9 +28,13 @@ models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+# Get origins from environment variables
+ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:5173,https://reddit-memes-ui.vercel.app')
+allowed_origins = ORIGINS.split(',')
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
