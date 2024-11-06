@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from .schemas import MemeReportRequest 
 from sqlalchemy import text
 from datetime import datetime
+from .scheduler import init_scheduler
 import os
 
 
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+scheduler = init_scheduler(app)
 
 # Get origins from environment variables
 ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:5173,https://reddit-memes-ui.vercel.app')
@@ -111,10 +113,6 @@ async def health_check(db: Session = Depends(get_db)):
 
     return health_status
 
-@app.get("/")
-def read_root():
-    return {"message": "Reddit Memes API"}
-
 @app.get("/memes/top")
 async def get_top_memes(
     limit: int = Query(20, ge=1, le=100),
@@ -144,18 +142,6 @@ async def get_top_memes(
         logger.error(f"Error in get_top_memes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/memes/paginated")
-async def get_paginated_memes(
-    limit: int = Query(50, ge=1, le=100),
-    after: Optional[str] = None
-):
-    """Get paginated memes"""
-    try:
-        async with RedditService() as reddit_service:
-            return await reddit_service.fetch_with_pagination(limit, after)
-    except Exception as e:
-        logger.error(f"Error in get_paginated_memes: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/memes/allmemes")
 async def get_meme_history(
@@ -226,10 +212,8 @@ async def send_meme_report(
         # Get memes
         async with RedditService() as reddit_service:
             memes = await reddit_service.fetch_top_memes(limit)
-
         # Initialize Telegram service
         telegram_service = TelegramService(bot_token, chat_id)
-        
         # Send report in background
         background_tasks.add_task(telegram_service.send_meme_report, memes)
         

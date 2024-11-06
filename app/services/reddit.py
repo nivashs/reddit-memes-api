@@ -115,8 +115,8 @@ class RedditService:
                         "thumbnail": post_data.get('thumbnail'),
                         "is_video": post_data.get('is_video', False)
                     }
-                    if meme['url'].endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                        memes.append(meme)
+                    # if meme['url'].endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                    memes.append(meme)
                         
                 memes.sort(key=lambda x: x["score"], reverse=True)
                 logger.info(f"Successfully fetched {len(memes)} memes")
@@ -124,50 +124,4 @@ class RedditService:
 
         except Exception as e:
             logger.error(f"Error fetching memes from Reddit: {e}")
-            raise
-
-    async def fetch_with_pagination(self, limit: int = 100, after: Optional[str] = None) -> Dict:
-        """Fetch memes with pagination support."""
-        try:
-            await self.ensure_valid_token()
-            url = f"{self.base_url}/top"
-            params = {"limit": limit, "t": "day"}
-            
-            if after:
-                params["after"] = after
-
-            async with self.session.get(
-                url,
-                headers=self.get_headers(),
-                params=params
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
-
-                memes = []
-                for post in data['data']['children']:
-                    post_data = post['data']
-                    meme = {
-                        "reddit_id": post_data['id'],
-                        "title": post_data['title'],
-                        "url": post_data.get('url_overridden_by_dest', post_data['url']),
-                        "score": post_data['score'],
-                        "upvote_ratio": post_data['upvote_ratio'],
-                        "author": post_data['author'],
-                        "num_comments": post_data['num_comments'],
-                        "permalink": f"https://reddit.com{post_data['permalink']}",
-                        "reddit_created_at": datetime.fromtimestamp(post_data['created_utc']),
-                        "thumbnail": post_data.get('thumbnail'),
-                        "is_video": post_data.get('is_video', False)
-                    }
-                    memes.append(meme)
-
-                return {
-                    "memes": memes,
-                    "next_page": data['data'].get('after'),
-                    "total": len(memes)
-                }
-
-        except Exception as e:
-            logger.error(f"Error fetching memes with pagination: {e}")
             raise
